@@ -188,7 +188,15 @@ function gen(){
   roomTiles=[]; for(let i=0;i<W*H;i++)if(grid[i]===0)roomTiles.push(i);
 }
 function corridor([x1,y1],[x2,y2]){
-  const carve=(x,y)=>{const i=y*W+x; if(grid[i]===1)grid[i]=2;};
+  // 通路ごとに 1マス幅 か 2マス幅 をランダムに決める（外周の壁は残す）
+  const wide=Math.random()<.5;
+  const cells=wide?[[0,0],[1,0],[0,1],[1,1]]:[[0,0]];
+  const carve=(x,y)=>{
+    for(const [dx,dy] of cells){
+      const cx=x+dx,cy=y+dy; if(cx<1||cy<1||cx>W-2||cy>H-2)continue;
+      const i=cy*W+cx; if(grid[i]===1)grid[i]=2;
+    }
+  };
   if(Math.random()<.5){
     for(let x=Math.min(x1,x2);x<=Math.max(x1,x2);x++)carve(x,y1);
     for(let y=Math.min(y1,y2);y<=Math.max(y1,y2);y++)carve(x2,y);
@@ -396,7 +404,7 @@ const I18N={
     ],
     notePre:'── 札の裏に ──',
     m_intro1:'札は五枚。どこかの部屋に貼られている。', m_intro2:'影は光に弱い。蛾は光に集まる。',
-    m_dead:'電池が切れた。どこかに替えがあるはずだ。', m_bat:'電池を拾った。', m_door:'玄関へ戻れ。',
+    m_dead:'電池が切れた。どこかに替えがあるはずだ。', m_bat:'電池を拾った。', m_door:'玄関へ戻れ。足元の灯りをたどって。',
     m_kage:'照らしている間、影は動かない。', m_moth:'羽音が近づいてくる。灯りを消せ。', m_behind:'……うしろ',
     h_ofuda:'札', h_light:'灯', h_breath:'息', h_door:'玄関へ',
     clock:(h,m)=>`午前 ${h}:${m}`,
@@ -425,7 +433,7 @@ const I18N={
     ],
     notePre:'── WRITTEN ON THE BACK ──',
     m_intro1:'Five talismans. Each is pasted up in one of the rooms.', m_intro2:'The shadow fears light. The moth craves it.',
-    m_dead:'The batteries are dead. There must be spares somewhere.', m_bat:'Picked up a battery.', m_door:'Go back to the entrance.',
+    m_dead:'The batteries are dead. There must be spares somewhere.', m_bat:'Picked up a battery.', m_door:'Go back to the entrance. Follow the lights on the floor.',
     m_kage:'While you keep it lit, the shadow cannot move.', m_moth:'Wings, getting closer. Turn off your light.', m_behind:'…behind you',
     h_ofuda:'OFUDA', h_light:'LIGHT', h_breath:'BREATH', h_door:'TO THE EXIT',
     clock:(h,m)=>`${h}:${m} A.M.`,
@@ -453,7 +461,7 @@ $('langJa').addEventListener('click',()=>setLang('ja'));
 $('langEn').addEventListener('click',()=>setLang('en'));
 applyLang();
 let state='title', paused=false;
-let p,kage,moth,items,door,pf,mf,pfTile,time,grace,parts,shake,scareT,scareBy,hbT,stepT,whisperCD,danger,ofuda,flick,effLight,lightPoly,ambPoly,pulse,hints,msgTimer,beamHit;
+let exitField,p,kage,moth,items,door,pf,mf,pfTile,time,grace,parts,shake,scareT,scareBy,hbT,stepT,whisperCD,danger,ofuda,flick,effLight,lightPoly,ambPoly,pulse,hints,msgTimer,beamHit;
 const mouse={x:0,y:0,active:false};
 const keys={};
 let joy=null, aimTouch=null, touchRun=false;
@@ -481,6 +489,7 @@ function newGame(){
   kage={x:(kr.c[0]+.5)*T,y:(kr.c[1]+.5)*T,lit:false,dir:0,moved:0,trail:[]};
   moth={x:(mr.c[0]+.5)*T,y:(mr.c[1]+.5)*T,mode:'wander',dir:0,flap:0,goal:-1};
   pf=new Int16Array(W*H); mf=new Int16Array(W*H); pfTile=-1;
+  exitField=bfs(door.tx,door.ty+1,new Int16Array(W*H));
   newWander();
   time=0; grace=3; parts=[]; shake=0; scareT=0; scareBy=''; hbT=0; stepT=0; whisperCD=10; danger=0; ofuda=0; flick=0; effLight=true;
   lightPoly=[]; ambPoly=[]; pulse=0; hints={}; beamHit=false; paused=false;
@@ -561,7 +570,7 @@ function update(dt){
   const wantRun=(keys.ShiftLeft||keys.ShiftRight||touchRun)&&p.moving;
   p.running=wantRun&&p.stam>0&&(p.running||p.stam>15);
   if(p.running)p.stam=Math.max(0,p.stam-28*dt); else p.stam=Math.min(100,p.stam+(p.moving?10:18)*dt);
-  const sp=(p.running?165:100)*mag*dt*(DEV.fast?2:1);
+  const sp=(p.running?165:112)*mag*dt*(DEV.fast?2:1);
   const nx=p.x+mx*sp; if(!hitWall(nx,p.y,9))p.x=nx;
   const ny=p.y+my*sp; if(!hitWall(p.x,ny,9))p.y=ny;
   if(p.moving){stepT+=dt*(p.running?3:1.9); if(stepT>=1){stepT-=1; step(p.running);}}
@@ -585,14 +594,14 @@ function update(dt){
   // 経路
   const ptx=Math.floor(p.x/T),pty=Math.floor(p.y/T),pti=pty*W+ptx;
   if(pti!==pfTile){pfTile=pti; bfs(ptx,pty,pf);}
-  const mult=1+ofuda*.075;
+  const mult=1+ofuda*.06;
   // 影
   const kd=Math.hypot(kage.x-p.x,kage.y-p.y);
   kage.lit=inBeam(kage,12);
   kage.moved=0;
   if(!kage.lit&&grace<=0&&!DEV.freezeKage){
     const kt=Math.floor(kage.y/T)*W+Math.floor(kage.x/T);
-    let s=64*mult*(pf[kt]>22?1.7:1)*dt;
+    let s=54*mult*(pf[kt]>22?1.7:1)*dt;
     const ox=kage.x,oy=kage.y;
     if(kd<T*4&&los(kage.x,kage.y,p.x,p.y))moveToward(kage,p.x,p.y,s); else stepField(kage,pf,s);
     kage.moved=Math.hypot(kage.x-ox,kage.y-oy);
@@ -610,11 +619,11 @@ function update(dt){
     else if(moth.mode==='chase'){moth.mode='seek'; moth.goal=pfTile; bfs(ptx,pty,mf);}
     if(p.running&&md<180&&moth.mode!=='chase'){moth.mode='seek'; moth.goal=pfTile; bfs(ptx,pty,mf);}
     if(moth.mode==='chase'){
-      const s=(beamHit?102:74)*mult*dt;
+      const s=(beamHit?88:63)*mult*dt;
       if(md<T*4&&los(moth.x,moth.y,p.x,p.y))moveToward(moth,p.x,p.y,s); else stepField(moth,pf,s);
       if(md<320&&!hints.moth){hints.moth=1; showMsg(L('m_moth'),3000);}
     }else{
-      const left=stepField(moth,mf,(moth.mode==='seek'?58:40)*mult*dt);
+      const left=stepField(moth,mf,(moth.mode==='seek'?50:35)*mult*dt);
       if(left===0&&Math.hypot(moth.x-((moth.goal%W)+.5)*T,moth.y-((moth.goal/W|0)+.5)*T)<4){moth.mode='wander'; newWander();}
     }
   }
@@ -720,8 +729,24 @@ function drawItems(){
   ctx.strokeStyle='#5c3222'; ctx.lineWidth=1.5; ctx.strokeRect(x+2,y+T*.2+1,T-4,T*.8-2);
   ctx.beginPath(); for(let k=1;k<4;k++){ctx.moveTo(x+k*T/4,y+T*.2);ctx.lineTo(x+k*T/4,y+T);} ctx.stroke();
 }
+function drawExitPath(tt){
+  // 札が揃ったら、今いる場所から玄関までの最短路を灯りの点で示す
+  let i=Math.floor(p.y/T)*W+Math.floor(p.x/T);
+  for(let k=0;k<600&&exitField[i]>0&&exitField[i]<32767;k++){
+    let best=i;
+    for(const n of [i-1,i+1,i-W,i+W])if(n>=0&&n<W*H&&exitField[n]<exitField[best])best=n;
+    if(best===i)break;
+    i=best;
+    if(k<1)continue;
+    const x=(i%W+.5)*T,y=((i/W|0)+.5)*T, a=.22+.2*Math.max(0,Math.sin(tt*4-k*.45));
+    const g=ctx.createRadialGradient(x,y,0,x,y,9);
+    g.addColorStop(0,`rgba(233,217,166,${a})`); g.addColorStop(1,'rgba(233,217,166,0)');
+    ctx.fillStyle=g; ctx.fillRect(x-9,y-9,18,18);
+  }
+}
 function drawAfterDark(){
   const tt=performance.now()/1000;
+  if(ofuda===5)drawExitPath(tt);
   for(const it of items){
     if(it.got||it.type!=='ofuda')continue;
     const a=.13+.08*Math.sin(tt*2+it.x);
