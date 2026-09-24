@@ -65,12 +65,33 @@ html[lang="en"] .btn{letter-spacing:.18em}
 .touchui button.on{background:rgba(233,217,166,.2)}
 @media (pointer:coarse){.touchui.live{display:flex}}
 @media (prefers-reduced-motion:reduce){.screen::before{animation:none}}
+/* 開発者モード */
+#dev{position:fixed;top:calc(64px + env(safe-area-inset-top,0px));right:16px;z-index:6;background:rgba(8,8,6,.88);border:1px solid rgba(120,200,140,.45);padding:10px 12px;font-family:"DotGothic16",monospace;font-size:12px;color:#bfe3c6;display:flex;flex-direction:column;gap:4px;min-width:190px}
+#dev h3{margin:0 0 4px;font-size:12px;font-weight:400;letter-spacing:.2em;color:#7fd494}
+#dev label{display:flex;gap:8px;align-items:center;cursor:pointer}
+#dev kbd{font:inherit;color:#7c8f80;min-width:1em}
+#dev button{font:inherit;font-size:12px;text-align:left;background:transparent;color:#bfe3c6;border:1px solid rgba(120,200,140,.3);padding:3px 6px;cursor:pointer}
+#dev button:hover{background:rgba(120,200,140,.15)}
+#dev .hint{color:#7c8f80;margin:4px 0 0}
 </style>
 
 </head>
 <body>
 <canvas id="game" aria-label="ゲーム画面"></canvas>
 <div id="msg" role="status" aria-live="polite"></div>
+<aside id="dev" hidden aria-label="開発者モード">
+  <h3>DEV MODE</h3>
+  <label><kbd>1</kbd><input type="checkbox" id="dv-freezeKage">影を止める</label>
+  <label><kbd>2</kbd><input type="checkbox" id="dv-freezeMoth">蛾を止める</label>
+  <label><kbd>3</kbd><input type="checkbox" id="dv-god">無敵（捕まらない）</label>
+  <label><kbd>4</kbd><input type="checkbox" id="dv-infBat">電池無限</label>
+  <label><kbd>5</kbd><input type="checkbox" id="dv-reveal">暗闇を薄くする</label>
+  <label><kbd>6</kbd><input type="checkbox" id="dv-showEnemies">敵と札の位置を表示</label>
+  <label><kbd>7</kbd><input type="checkbox" id="dv-fast">移動速度 2倍</label>
+  <button type="button" id="dv-ofuda"><kbd>8</kbd> 札を全部取る</button>
+  <button type="button" id="dv-warp"><kbd>9</kbd> 玄関へワープ</button>
+  <p class="hint">0 でパネル表示切替</p>
+</aside>
 <div class="touchui" id="touchui">
   <button id="tRun" aria-label="走る">走</button>
   <button id="tLight" aria-label="灯りを切り替える">灯</button>
@@ -346,6 +367,16 @@ function sfxLevels(k,m){
 }
 
 /* ───────── 状態 ───────── */
+/* ───────── 開発者モード ───────── */
+const DEV={freezeKage:false,freezeMoth:false,god:false,infBat:false,reveal:false,showEnemies:false,fast:false};
+const DEV_KEYS=['freezeKage','freezeMoth','god','infBat','reveal','showEnemies','fast'];
+function devSet(k,v){DEV[k]=v; $('dv-'+k).checked=v;}
+DEV_KEYS.forEach(k=>$('dv-'+k).addEventListener('change',e=>{DEV[k]=e.target.checked; e.target.blur();}));
+function devOfuda(){if(state!=='play')return; for(const it of items)if(it.type==='ofuda'&&!it.got){it.got=true; ofuda++;} bell();}
+function devWarp(){if(state!=='play')return; p.x=(door.tx+.5)*T; p.y=(door.ty+1.5)*T;}
+$('dv-ofuda').addEventListener('click',e=>{devOfuda(); e.target.blur();});
+$('dv-warp').addEventListener('click',e=>{devWarp(); e.target.blur();});
+if(/(^|[?&#])dev\b/.test(location.search+location.hash))$('dev').hidden=false;
 const I18N={
   ja:{
     eyebrow:'廃旅館「月見荘」　午前二時',
@@ -530,7 +561,7 @@ function update(dt){
   const wantRun=(keys.ShiftLeft||keys.ShiftRight||touchRun)&&p.moving;
   p.running=wantRun&&p.stam>0&&(p.running||p.stam>15);
   if(p.running)p.stam=Math.max(0,p.stam-28*dt); else p.stam=Math.min(100,p.stam+(p.moving?10:18)*dt);
-  const sp=(p.running?165:100)*mag*dt;
+  const sp=(p.running?165:100)*mag*dt*(DEV.fast?2:1);
   const nx=p.x+mx*sp; if(!hitWall(nx,p.y,9))p.x=nx;
   const ny=p.y+my*sp; if(!hitWall(p.x,ny,9))p.y=ny;
   if(p.moving){stepT+=dt*(p.running?3:1.9); if(stepT>=1){stepT-=1; step(p.running);}}
@@ -539,7 +570,7 @@ function update(dt){
   else if(aimTouch){p.a=Math.atan2(aimTouch.y-vh/2,aimTouch.x-vw/2);}
   else if(p.moving){const ta=Math.atan2(my,mx); p.a+=angN(ta-p.a)*Math.min(1,dt*8);}
   // 電池と瞬き
-  if(p.light&&p.battery>0){p.battery=Math.max(0,p.battery-1.35*dt); if(p.battery===0&&!hints.dead){hints.dead=1; showMsg(L('m_dead'),3200);}}
+  if(p.light&&p.battery>0&&!DEV.infBat){p.battery=Math.max(0,p.battery-1.35*dt); if(p.battery===0&&!hints.dead){hints.dead=1; showMsg(L('m_dead'),3200);}}
   if(flick>0)flick-=dt;
   else if(p.light&&p.battery<22&&Math.random()<dt*(1.8-p.battery/15)){flick=rf(.05,.25);}
   effLight=p.light&&p.battery>0&&flick<=0;
@@ -559,7 +590,7 @@ function update(dt){
   const kd=Math.hypot(kage.x-p.x,kage.y-p.y);
   kage.lit=inBeam(kage,12);
   kage.moved=0;
-  if(!kage.lit&&grace<=0){
+  if(!kage.lit&&grace<=0&&!DEV.freezeKage){
     const kt=Math.floor(kage.y/T)*W+Math.floor(kage.x/T);
     let s=64*mult*(pf[kt]>22?1.7:1)*dt;
     const ox=kage.x,oy=kage.y;
@@ -573,7 +604,7 @@ function update(dt){
   const mt=Math.floor(moth.y/T)*W+Math.floor(moth.x/T);
   beamHit=inBeam(moth,18);
   moth.flap+=dt*(moth.mode==='chase'?26:14);
-  if(grace<=0){
+  if(grace<=0&&!DEV.freezeMoth){
     const sees=effLight&&pf[mt]<30;
     if(sees)moth.mode='chase';
     else if(moth.mode==='chase'){moth.mode='seek'; moth.goal=pfTile; bfs(ptx,pty,mf);}
@@ -614,7 +645,7 @@ function update(dt){
   }
   shake=Math.max(0,shake-dt*10);
   // 決着
-  if(grace<=0){
+  if(grace<=0&&!DEV.god){
     if(kd<17)return startScare('kage');
     if(md<19)return startScare('moth');
   }
@@ -720,7 +751,7 @@ function drawAfterDark(){
 function drawDarkness(){
   dctx.setTransform(1,0,0,1,0,0); dctx.globalCompositeOperation='source-over';
   dctx.clearRect(0,0,dark.width,dark.height);
-  dctx.fillStyle='rgba(2,2,3,.972)'; dctx.fillRect(0,0,dark.width,dark.height);
+  dctx.fillStyle=DEV.reveal?'rgba(2,2,3,.45)':'rgba(2,2,3,.972)'; dctx.fillRect(0,0,dark.width,dark.height);
   camT(dctx); dctx.globalCompositeOperation='destination-out';
   let g=dctx.createRadialGradient(p.x,p.y,0,p.x,p.y,78);
   g.addColorStop(0,'rgba(0,0,0,.62)'); g.addColorStop(1,'rgba(0,0,0,0)');
@@ -738,6 +769,18 @@ function drawDarkness(){
     g.addColorStop(0,'rgba(255,196,120,.12)'); g.addColorStop(1,'rgba(255,196,120,0)');
     ctx.fillStyle=g; fillPoly(ctx,lightPoly); ctx.globalCompositeOperation='source-over';
   }
+}
+function drawDevMarkers(){
+  if(!DEV.showEnemies)return;
+  ctx.lineWidth=1.5; ctx.font='11px "DotGothic16", monospace'; ctx.textAlign='center';
+  const mark=(x,y,col,label)=>{
+    ctx.strokeStyle=col; ctx.setLineDash([4,4]); ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(x,y); ctx.stroke(); ctx.setLineDash([]);
+    ctx.beginPath(); ctx.arc(x,y,16,0,TAU); ctx.stroke(); ctx.fillStyle=col; ctx.fillText(label,x,y-22);
+  };
+  mark(kage.x,kage.y,'rgba(120,200,255,.9)',kage.lit?'影 (停止中)':'影');
+  mark(moth.x,moth.y,'rgba(255,170,90,.9)','蛾 '+moth.mode);
+  for(const it of items)if(it.type==='ofuda'&&!it.got)mark(it.x,it.y,'rgba(255,90,80,.6)','札');
+  ctx.textAlign='left';
 }
 function drawHUD(){
   ctx.setTransform(dpr,0,0,dpr,0,0);
@@ -792,7 +835,7 @@ function drawWorld(){
   for(const q of parts){if(q.a!=='m')continue; const w=2+Math.abs(Math.sin(q.t))*2.5; ctx.fillRect(q.x-w,q.y-1,w*2,2);}
   drawMoth(); drawKage(); drawPlayer();
   drawDarkness();
-  camT(ctx); drawAfterDark();
+  camT(ctx); drawAfterDark(); drawDevMarkers();
   drawOverlay(); drawHUD();
 }
 function drawScare(){
@@ -888,6 +931,12 @@ addEventListener('keydown',e=>{
   if(state==='play'&&['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))e.preventDefault();
   if(e.repeat)return;
   keys[e.code]=true;
+  if(e.code==='Digit0'){$('dev').hidden=!$('dev').hidden; return;}
+  if(!$('dev').hidden&&/^Digit[1-9]$/.test(e.code)){
+    const n=+e.code.slice(5);
+    if(n<=7){const k=DEV_KEYS[n-1]; devSet(k,!DEV[k]);} else if(n===8)devOfuda(); else devWarp();
+    return;
+  }
   if(state!=='play')return;
   if(e.code==='Escape'||e.code==='KeyP'){setPause(!paused);return;}
   if(e.code==='Space'||e.code==='KeyF')toggleLight();
